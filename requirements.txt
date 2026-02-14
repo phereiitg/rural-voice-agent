@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+websockets
+google-generativeai
+numpy
+scipy
+langchain
+langchain-community
+faiss-cpu
+sentence-transformers
+requests
+python-dotenv
+twilio
+pydantic
+aiofiles
+python-multipart

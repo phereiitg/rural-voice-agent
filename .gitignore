@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# Environment Variables
+.env
+.env.local
+.env.production
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+voice_ai.log
+
+# Data
+data/emergency_logs/*.log
+data/*.pkl
+data/*.index
+
+# Vector Stores (optional - comment out if you want to commit them)
+data/hospital_vectors/
+data/scheme_vectors/
+data/ncert_vectors/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+temp/
+tmp/
+
+# ngrok
+ngrok.yml
+
+# Railway
+.railway/
+
+# Render
+render.yaml
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
