@@ -37,6 +37,9 @@ class SMSService:
         Returns:
             Dict with send status
         """
+        if to_number == self.from_number:
+            logger.warning(f"Skipping SMS — to/from are the same number. Use a different phone.")
+            return {"success": False, "error": "to/from same number"}
         if not self.client:
             logger.error("SMS service not configured")
             return {

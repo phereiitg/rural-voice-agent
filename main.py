@@ -21,14 +21,19 @@ from vector_store import vector_store
 
 
 
-# Configure logging
+# Configure logging — force UTF-8 on all handlers so Hindi text
+# doesn't crash on Windows (which defaults to cp1252)
+import sys
+_file_handler = logging.FileHandler('voice_ai.log', encoding='utf-8')
+_stream_handler = logging.StreamHandler(sys.stdout)
+_stream_handler.stream = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
+_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+_file_handler.setFormatter(_formatter)
+_stream_handler.setFormatter(_formatter)
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('voice_ai.log'),
-        logging.StreamHandler()
-    ]
+    handlers=[_file_handler, _stream_handler]
 )
 
 logger = logging.getLogger(__name__)
@@ -195,6 +200,7 @@ async def incoming_call(request: Request):
     <Connect>
         <Stream url="{stream_url}/media-stream">
             <Parameter name="From" value="{from_number}" />
+            <Parameter name="To" value="{to_number}" />
             <Parameter name="CallSid" value="{call_sid}" />
         </Stream>
     </Connect>
@@ -215,7 +221,7 @@ async def media_stream_endpoint(websocket: WebSocket):
     await handler.handle_stream(websocket)
 
 
-@app.get("/ambulance-briefing")
+@app.post("/ambulance-briefing")
 async def ambulance_briefing(
     name: str = "अज्ञात",
     location: str = "",
@@ -240,34 +246,55 @@ async def ambulance_briefing(
        कॉलर का नंबर है: +91 99 XXXX XXXX।
        कृपया तुरंत सहायता भेजें।"
     """
-    # Build spoken text — repeat twice so it's not missed
-    condition_part = f"मरीज की स्थिति: {condition}। " if condition else ""
+    import html as html_lib  # XML/HTML escaping
 
-    spoken_text = (
-        f"सावधान! आपातकालीन कॉल। "
-        f"मरीज का नाम: {name}। "
-        f"स्थान: {location}। "
-        f"आपातकाल: {emergency}। "
+    # Escape all user-provided values so they're safe inside XML <Say> tags.
+    # Without this, special chars (em dash, &, <, >) break the TwiML and
+    # Twilio returns "Application Error" when the call is answered.
+    def xs(text: str) -> str:
+        """XML-safe escape"""
+        return html_lib.escape(str(text), quote=False)
+    
+    # Add this helper function inside ambulance_briefing, after the xs() function:
+    def speak_phone(number: str) -> str:
+        """Convert +919235527628 → 9 2 3 5 5 2 7 6 2 8 (spaced digits, no country code)"""
+        digits = ''.join(c for c in number if c.isdigit())
+        if digits.startswith('91') and len(digits) == 12:
+            digits = digits[2:]  # strip India country code
+        return ' '.join(digits)  # space between each digit so TTS reads them one by one
+
+    condition_part = f"मरीज की स्थिति: {xs(condition)}. " if condition else ""
+
+    # Build two <Say> blocks — one full briefing, one short repeat
+    first_say = (
+        f"सावधान! आपातकालीन कॉल. "
+        f"मरीज का नाम: {xs(name)}. "
+        f"स्थान: {xs(location)}. "
+        f"आपातकाल: {xs(emergency)}. "
         f"{condition_part}"
-        f"कॉलर का नंबर है: {phone}। "
-        f"कृपया तुरंत सहायता भेजें। "
-        # Repeat once so dispatcher doesn't miss it
-        f"दोबारा सुनें — "
-        f"मरीज का नाम: {name}। "
-        f"स्थान: {location}। "
-        f"कॉलर नंबर: {phone}।"
+        f"कॉलर का नंबर है: {speak_phone(phone)}. "
+        f"कृपया तुरंत सहायता भेजें."
+    )
+
+    repeat_say = (
+        f"दोबारा सुनें. "
+        f"मरीज का नाम: {xs(name)}. "
+        f"स्थान: {xs(location)}. "
+        f"कॉलर नंबर: {speak_phone(phone)}."
     )
 
     logger.info(
-        f"🔊 Ambulance briefing served | name={name} | location={location} "
+        f"Ambulance briefing served | name={name} | location={location} "
         f"| emergency={emergency} | phone={phone}"
     )
 
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say language="hi-IN" voice="woman">{spoken_text}</Say>
+    <Say language="hi-IN" voice="Polly.Aditi">{first_say}</Say>
+    <Pause length="2"/>
+    <Say language="hi-IN" voice="Polly.Aditi">{repeat_say}</Say>
     <Pause length="1"/>
-    <Say language="hi-IN" voice="woman">यह कॉल समाप्त होती है। धन्यवाद।</Say>
+    <Say language="hi-IN" voice="Polly.Aditi">यह कॉल समाप्त होती है. धन्यवाद.</Say>
 </Response>"""
 
     return Response(content=twiml, media_type="application/xml")

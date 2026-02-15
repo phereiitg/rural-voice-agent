@@ -4,6 +4,7 @@ Bridges Twilio and Gemini WebSocket connections for real-time voice AI
 """
 
 import asyncio
+import os
 import json
 import logging
 from datetime import datetime
@@ -109,13 +110,25 @@ class MediaStreamHandler:
         start_data = data.get('start', {})
         self.stream_sid = data.get('streamSid')
         self.call_sid = start_data.get('callSid')
-        
-        # Get caller's phone number
+
         custom_params = start_data.get('customParameters', {})
-        self.user_phone = custom_params.get('From')
-        
+        from_number = custom_params.get('From', '')
+        to_number = custom_params.get('To', '')
+        twilio_number = os.getenv('TWILIO_PHONE_NUMBER', '')
+
+        # When call_me.py dials out, From = Twilio number, To = real person.
+        # When someone calls in normally, From = real person, To = Twilio number.
+        # So: the real user phone is whichever of From/To is NOT the Twilio number.
+        if from_number and from_number != twilio_number:
+            self.user_phone = from_number
+        elif to_number and to_number != twilio_number:
+            self.user_phone = to_number
+        else:
+            self.user_phone = from_number  # fallback
+
         logger.info(f"Call started: {self.call_sid}")
-        logger.info(f" Caller: {self.user_phone}")
+        logger.info(f" From: {from_number} | To: {to_number} | Twilio: {twilio_number}")
+        logger.info(f" Real user phone: {self.user_phone}")
         logger.info(f" Stream: {self.stream_sid}")
     
     async def handle_media_chunk(self, data: dict):

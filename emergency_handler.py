@@ -14,6 +14,7 @@ import logging
 import requests
 from datetime import datetime
 from typing import Dict, Optional
+from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
 
@@ -22,35 +23,44 @@ class EmergencyHandler:
     """Handles emergency detection and ambulance calling"""
 
     def __init__(self):
-        self.exotel_sid = os.getenv("EXOTEL_SID")
-        self.exotel_token = os.getenv("EXOTEL_TOKEN")
-        self.exotel_number = os.getenv("EXOTEL_NUMBER")
+        # --- Twilio credentials (reuse what you already have) ---
+        self.twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        self.twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
+        self.twilio_number = os.getenv("TWILIO_PHONE_NUMBER")
+
         self.ambulance_number = os.getenv("AMBULANCE_NUMBER", "+911082345678")
 
         # --- Demo Mode ---
-        # Set DEMO_MODE=true in .env to route calls to your own number
-        # instead of the real ambulance (108). Safe for demos/hackathons.
+        # Set DEMO_MODE=true + DEMO_PHONE_NUMBER=+91XXXXXXXXXX in .env
+        # to call your own phone instead of the real ambulance.
         self.demo_mode = os.getenv("DEMO_MODE", "false").lower() == "true"
-        self.demo_phone = os.getenv("DEMO_PHONE_NUMBER", "")  # e.g. +919876543210
+        self.demo_phone = os.getenv("DEMO_PHONE_NUMBER", "")
 
         if self.demo_mode:
+            logger.info("Demo Mode is on")
             if not self.demo_phone:
-                logger.warning("⚠️  DEMO_MODE is ON but DEMO_PHONE_NUMBER is not set!")
+                logger.warning("DEMO_MODE is ON but DEMO_PHONE_NUMBER is not set!")
             else:
                 logger.warning(
-                    f"🧪 DEMO_MODE is ON — emergency calls will go to "
-                    f"{self.demo_phone} instead of 108"
+                    f"DEMO_MODE ON — ambulance calls go to {self.demo_phone} instead of 108"
                 )
                 self.ambulance_number = self.demo_phone  # override target
+
+        # Build Twilio client
+        if self.twilio_sid and self.twilio_token:
+            self.twilio_client = TwilioClient(self.twilio_sid, self.twilio_token)
+        else:
+            self.twilio_client = None
+            logger.warning("Twilio credentials not set — ambulance calls disabled")
 
         self.emergency_keywords = [
             "दुर्घटना", "accident", "चोट", "injury", "खून", "blood",
             "दर्द", "pain", "बेहोश", "unconscious", "सांस", "breathing",
             "दिल का दौरा", "heart attack", "स्ट्रोक", "stroke",
-            "जहर", "poison", "आग", "fire", "जल", "burn"
+            "जहर", "poison", "आग", "fire", "जल", "burn" , "emergency", "ambulance"
         ]
 
-        logger.info("EmergencyHandler initialized")
+        logger.info("🚑EmergencyHandler initialized")
 
     def detect_emergency(self, text: str) -> bool:
         """
@@ -116,38 +126,29 @@ class EmergencyHandler:
                 patient_condition, caller_name
             )
 
-            # Guard: Exotel credentials must be present
-            if not all([self.exotel_sid, self.exotel_token, self.exotel_number]):
-                logger.error("Exotel credentials not configured")
+            # Guard: Twilio must be configured
+            if not self.twilio_client:
+                logger.error("Twilio not configured — cannot place ambulance call")
                 return {
                     "success": False,
-                    "message": "कृपया सीधे 108 पर कॉल करें। एम्बुलेंस ऑटो-कॉल उपलब्ध नहीं है।",
+                    "message": "कृपया सीधे 108 पर कॉल करें। ऑटो-कॉल उपलब्ध नहीं है।",
                     "manual_number": "108",
                 }
 
             # Guard: demo phone must be set when in demo mode
             if self.demo_mode and not self.demo_phone:
-                logger.error("DEMO_MODE is ON but DEMO_PHONE_NUMBER is not configured")
+                logger.error("DEMO_MODE is ON but DEMO_PHONE_NUMBER is not set")
                 return {
                     "success": False,
-                    "message": "[DEMO] DEMO_PHONE_NUMBER not set in .env. Please add it.",
+                    "message": "DEMO_PHONE_NUMBER not set in .env",
                     "demo_mode": True,
                 }
 
-            call_target = self.ambulance_number  # already overridden to demo_phone if demo
-            logger.info(
-                f"Placing call to: {call_target} "
-                f"{'[DEMO]' if self.demo_mode else '[REAL 108]'}"
-            )
+            call_target = self.ambulance_number  # overridden to demo_phone if demo
+            logger.info(f"Placing call to: {call_target} {'[DEMO]' if self.demo_mode else '[REAL 108]'}")
 
-            # ---------------------------------------------------------------
-            # Build the TwiML briefing URL.
-            # When the call is answered (by you in demo, or 108 in production),
-            # Exotel fetches this URL. Our /ambulance-briefing endpoint returns
-            # TwiML that speaks the patient details aloud in Hindi, e.g.:
-            #   "सावधान! आपातकालीन कॉल। मरीज का नाम: अमित।
-            #    स्थान: एम.जी. रोड। कॉलर नंबर: +9199xxxx"
-            # ---------------------------------------------------------------
+            # Build TwiML briefing URL — spoken when call is answered.
+            # Twilio fetches this URL and reads patient details aloud in Hindi.
             server_url = os.getenv("SERVER_URL", "")
             briefing_url = (
                 f"{server_url}/ambulance-briefing"
@@ -159,67 +160,36 @@ class EmergencyHandler:
             )
             logger.info(f"Briefing URL: {briefing_url}")
 
-            # Exotel API call
-            url = (
-                f"https://api.exotel.com/v1/Accounts/"
-                f"{self.exotel_sid}/Calls/connect"
+            # Place the call via Twilio SDK
+            call = self.twilio_client.calls.create(
+                to=call_target,
+                from_=self.twilio_number,
+                url=briefing_url,
+                status_callback=f"{server_url}/call-status",
+                status_callback_method="POST",
             )
-            payload = {
-                "From": self.exotel_number,
-                "To": call_target,
-                "CallerId": user_phone,
-                "Url": briefing_url,      # ← spoken when the call is picked up
-                "StatusCallback": f"{server_url}/call-status",
-                "CustomField": (
-                    f"Emergency:{emergency_type}|Location:{location}"
-                    f"|Caller:{caller_name}|Demo:{self.demo_mode}"
+
+            name_part = f" {caller_name}" if caller_name else ""
+            logger.info(f"✅ AMBULANCE CALL PLACED SUCCESSFULLY!")
+            logger.info(f"   Call SID : {call.sid}")
+            logger.info(f"   Called   : {call_target}")
+            logger.info(f"   Status   : {call.status}")
+            logger.info(f"   Briefing : {briefing_url}")
+            logger.info(f"   NOTE: Your phone ({call_target}) should be ringing NOW.")
+            logger.info(f"   When you answer, Twilio will read the patient details aloud.")
+
+            return {
+                "success": True,
+                "message": (
+                    f"एम्बुलेंस बुलाई जा रही है {location} के लिए। "
+                    f"शांत रहें{name_part}। मदद आ रही है।"
                 ),
+                "call_sid": call.sid,
+                "demo_mode": self.demo_mode,
+                "called_number": call_target,
+                "instructions": "साँस लेते रहें। घबराएं नहीं। एम्बुलेंस 15-20 मिनट में पहुंचेगी।",
             }
 
-            response = requests.post(
-                url,
-                auth=(self.exotel_sid, self.exotel_token),
-                data=payload,
-                timeout=10,
-            )
-
-            if response.status_code == 200:
-                call_data = response.json()
-                call_sid = call_data.get("Call", {}).get("Sid", "Unknown")
-                name_part = f" {caller_name}" if caller_name else ""
-
-                if self.demo_mode:
-                    logger.warning(
-                        f"🧪 [DEMO] Call placed to {self.demo_phone} "
-                        f"successfully: {call_sid}"
-                    )
-                else:
-                    logger.info(f"Ambulance call initiated: {call_sid}")
-
-                return {
-                    "success": True,
-                    "message": (
-                        f"एम्बुलेंस बुलाई जा रही है {location} के लिए। "
-                        f"शांत रहें{name_part}। मदद आ रही है।"
-                    ),
-                    "call_sid": call_sid,
-                    "demo_mode": self.demo_mode,
-                    "called_number": call_target,
-                    "instructions": (
-                        "साँस लेते रहें। घबराएं नहीं। "
-                        "एम्बुलेंस 15-20 मिनट में पहुंचेगी।"
-                    ),
-                }
-            else:
-                logger.error(
-                    f"Exotel API error: {response.status_code} - {response.text}"
-                )
-                return {
-                    "success": False,
-                    "message": "ऑटो-कॉल में समस्या। कृपया तुरंत 108 डायल करें!",
-                    "manual_number": "108",
-                    "fallback": True,
-                }
 
         except requests.exceptions.Timeout:
             logger.error("Exotel API timeout")
