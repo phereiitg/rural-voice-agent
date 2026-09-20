@@ -52,11 +52,6 @@ data/emergency_logs/*.log
 data/*.pkl
 data/*.index
 
-# Vector Stores (optional - comment out if you want to commit them)
-data/hospital_vectors/
-data/scheme_vectors/
-data/ncert_vectors/
-
 # Testing
 .pytest_cache/
 .coverage
