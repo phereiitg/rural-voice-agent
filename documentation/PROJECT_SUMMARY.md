@@ -1,4 +1,4 @@
-# 🎉 PROJECT COMPLETE: Streaming Voice AI with Gemini Live API
+# Streaming Voice AI with Gemini Live API
 
 ## 📦 What You Got
 
@@ -486,6 +486,3 @@ python main.py
 
 ---
 
-*This is a complete, production-ready system. Everything you need is included.*
-
-*Good luck with your hackathon! 🎯*
