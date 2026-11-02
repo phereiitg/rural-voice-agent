@@ -451,7 +451,7 @@ MIT License - see LICENSE file for details
 
 For issues and questions:
 - Create a GitHub issue
-- Email: your-email@example.com
+- Email: thatsprakhar@gmail.com
 
 ---
 
